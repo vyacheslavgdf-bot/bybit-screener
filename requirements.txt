@@ -1,0 +1,6 @@
+python-telegram-bot==20.7
+bybit-sdk==1.3.0
+numpy
+pandas
+requests
+schedule
