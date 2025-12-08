@@ -1,5 +1,5 @@
 python-telegram-bot==20.7
-bybit==1.3.0
+bybit==0.2.12
 numpy
 pandas
 requests
