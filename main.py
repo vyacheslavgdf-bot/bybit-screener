@@ -14,6 +14,12 @@ if not TELEGRAM_BOT_TOKEN or not YOUR_TELEGRAM_ID:
     logger.error("Не заданы TELEGRAM_BOT_TOKEN или YOUR_TELEGRAM_ID")
     exit(1)
 
+# Заголовки для обхода блокировки Bybit
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+    'Referer': 'https://www.bybit.com/'
+}
+
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {'chat_id': YOUR_TELEGRAM_ID, 'text': text, 'parse_mode': 'HTML'}
@@ -26,19 +32,19 @@ def get_bybit_symbols():
     try:
         url = "https://api.bybit.com/v5/market/instruments-info"
         params = {'category': 'linear'}
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, headers=HEADERS, timeout=10)
         data = response.json()
         return [item['symbol'] for item in data['result']['list'] 
                 if item['status'] == 'Trading' and item['symbol'].endswith('USDT')]
     except Exception as e:
-        logger.error(f"Ошибка Bybit: {e}")
+        logger.error(f"Ошибка Bybit (инструменты): {e} | Ответ: {response.text[:200]}")
         return []
 
 def get_klines_bybit(symbol, interval='60', limit=100):
     try:
         url = "https://api.bybit.com/v5/market/kline"
         params = {'category': 'linear', 'symbol': symbol, 'interval': interval, 'limit': limit}
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, headers=HEADERS, timeout=10)
         data = response.json()
         if data['retCode'] != 0:
             return [], []
@@ -50,7 +56,7 @@ def get_klines_bybit(symbol, interval='60', limit=100):
         volumes.reverse()
         return closes, volumes
     except Exception as e:
-        logger.error(f"Свечи Bybit {symbol}: {e}")
+        logger.error(f"Ошибка Bybit (свечи {symbol}): {e} | Ответ: {response.text[:200]}")
         return [], []
 
 def calculate_rsi(prices, period=14):
@@ -94,14 +100,12 @@ def analyze_long_signal(symbol):
     if len(closes) < 30:
         return False
 
-    # Импульс: рост >25% за 6 часов (6 свечей на 1h)
     if len(closes) < 7:
         return False
     price_change_6h = (closes[-1] - closes[-7]) / closes[-7] * 100
     if price_change_6h < 25:
         return False
 
-    # Объём: +300% за 24ч
     if len(volumes) < 25:
         return False
     avg_vol_24h = sum(volumes[-24:]) / 24
@@ -111,21 +115,18 @@ def analyze_long_signal(symbol):
     if vol_change_pct < 300:
         return False
 
-    # RSI: 50–70
     rsi = calculate_rsi(closes, 14)
     if not rsi or not (50 <= rsi <= 70):
         return False
 
-    # MA: MA5 > MA10, цена около MA10 (откат)
     ma5 = calculate_ma(closes, 5)
     ma10 = calculate_ma(closes, 10)
     if not ma5 or not ma10 or ma5 <= ma10:
         return False
     price = closes[-1]
-    if not (ma10 * 0.99 <= price <= ma10 * 1.01):  # ±1% от MA10
+    if not (ma10 * 0.99 <= price <= ma10 * 1.01):
         return False
 
-    # MACD: подтверждение разворота (MACD > Signal)
     macd_line, signal_line = calculate_macd(closes)
     if macd_line is None or signal_line is None or macd_line <= signal_line:
         return False
@@ -143,7 +144,7 @@ def analyze_long_signal(symbol):
     send_telegram_message(message)
     return True
 
-# === SHORT-сигнал (существующий) ===
+# === SHORT-сигнал ===
 def analyze_short_signal(symbol):
     closes, volumes = get_klines_bybit(symbol, '60', 50)
     if len(closes) < 25:
