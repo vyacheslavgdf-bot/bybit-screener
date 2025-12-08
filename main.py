@@ -40,52 +40,64 @@ def get_klines_bybit(symbol, interval='60', limit=50):
         params = {'category': 'linear', 'symbol': symbol, 'interval': interval, 'limit': limit}
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
-        if data['retCode'] != 0: return [], []
+        if data['retCode'] != 0:
+            return [], []
         closes, volumes = [], []
         for kline in data['result']['list']:
             closes.append(float(kline[4]))
             volumes.append(float(kline[5]))
-        closes.reverse(); volumes.reverse()
+        closes.reverse()
+        volumes.reverse()
         return closes, volumes
     except Exception as e:
         logger.error(f"Свечи Bybit {symbol}: {e}")
         return [], []
 
 def calculate_rsi(prices, period=14):
-    if len(prices) < period + 1: return None
-    gains = []; losses = []
+    if len(prices) < period + 1:
+        return None
+    gains = []
+    losses = []
     for i in range(1, len(prices)):
         diff = prices[i] - prices[i-1]
         gains.append(diff if diff > 0 else 0)
         losses.append(abs(diff) if diff < 0 else 0)
     avg_gain = sum(gains[:period]) / period
     avg_loss = sum(losses[:period]) / period
-    if avg_loss == 0: return 100
+    if avg_loss == 0:
+        return 100
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
 def calculate_ma(prices, window):
-    if len(prices) < window: return None
+    if len(prices) < window:
+        return None
     return sum(prices[-window:]) / window
 
 def analyze_symbol(symbol):
     closes, volumes = get_klines_bybit(symbol, '60', 50)
-    if len(closes) < 25: return False
+    if len(closes) < 25:
+        return False
 
     price_change_6h = (closes[-1] - closes[-7]) / closes[-7] * 100
-    if price_change_6h < 25: return False
+    if price_change_6h < 25:
+        return False
 
     avg_volume_24h = sum(volumes[-24:]) / 24
-    if avg_volume_24h == 0: return False
+    if avg_volume_24h == 0:
+        return False
     volume_change_pct = (volumes[-1] - avg_volume_24h) / avg_volume_24h * 100
-    if volume_change_pct < 300: return False
+    if volume_change_pct < 300:
+        return False
 
     rsi = calculate_rsi(closes, 14)
-    if not rsi or rsi < 70: return False
+    if not rsi or rsi < 70:
+        return False
 
     ma5 = calculate_ma(closes, 5)
     ma10 = calculate_ma(closes, 10)
-    if not ma5 or not ma10 or ma5 > ma10: return False
+    if not ma5 or not ma10 or ma5 > ma10:
+        return False
 
     message = (
         f"🚨 ПОТЕНЦИАЛЬНЫЙ SHORT-СИГНАЛ (Bybit)!\n\n"
@@ -102,11 +114,16 @@ def analyze_symbol(symbol):
 def main():
     logger.info("🔍 Сканирование Bybit...")
     symbols = get_bybit_symbols()[:100]
-    found = sum(analyze_symbol(symbol) for symbol in symbols if analyze_symbol)
+    found = 0
+    for symbol in symbols:
+        if analyze_symbol(symbol):
+            found += 1
     logger.info(f"✅ Найдено: {found} сигналов")
 
 if __name__ == "__main__":
     while True:
-        try: main()
-        except: pass
+        try:
+            main()
+        except Exception as e:
+            logger.error(f"Ошибка в основном цикле: {e}")
         time.sleep(900)
