@@ -7,6 +7,7 @@ import pandas as pd
 from telegram import Bot
 from telegram.error import TelegramError
 import schedule
+from datetime import datetime, timezone
 
 # === Настройка логирования ===
 logging.basicConfig(
@@ -33,6 +34,17 @@ SYMBOLS = [
 ]
 
 LIMIT = 100
+
+# === Фильтр по времени (UTC) ===
+# Торгуем только с 00:00 до 23:59 UTC — вы можете изменить
+# Например: с 8 до 22 → if 8 <= hour <= 22:
+def is_trading_time():
+    now = datetime.now(timezone.utc)
+    hour = now.hour
+    # Уберите ограничение, если хотите торговать 24/7:
+    return True  # 24/7
+    # Пример: торговать только с 8 до 22 UTC:
+    # return 8 <= hour <= 22
 
 # === Вспомогательные функции ===
 def fetch_klines(symbol, exchange):
@@ -75,8 +87,6 @@ def fetch_klines(symbol, exchange):
 def calculate_indicators(df):
     close = df["close"].values
     volume = df["volume"].values
-    high = df["high"].values
-    low = df["low"].values
 
     # MA
     ma5 = pd.Series(close).rolling(window=5).mean().iloc[-1]
@@ -96,21 +106,15 @@ def calculate_indicators(df):
     ema12 = pd.Series(close).ewm(span=12, adjust=False).mean().iloc[-1]
     ema26 = pd.Series(close).ewm(span=26, adjust=False).mean().iloc[-1]
     macd_line = ema12 - ema26
-    signal_line = pd.Series([ema12 - ema26] * 9).ewm(span=9, adjust=False).mean().iloc[-1] if len(close) >= 9 else 0
     if len(close) >= 35:
         macd_full = pd.Series(close).ewm(span=12, adjust=False).mean() - pd.Series(close).ewm(span=26, adjust=False).mean()
         signal_line = macd_full.ewm(span=9, adjust=False).mean().iloc[-1]
     else:
         signal_line = macd_line
 
-    # Средний объём за последние 20 свечей
+    # Объём
     avg_volume = np.mean(volume[-20:]) if len(volume) >= 20 else 0
     current_volume = volume[-1]
-
-    # ATR (опционально — можно включить)
-    # tr = np.maximum(high - low, np.maximum(np.abs(high - np.roll(close, 1)), np.abs(low - np.roll(close, 1))))
-    # atr = pd.Series(tr).rolling(window=14).mean().iloc[-1]
-    # avg_atr = np.mean(pd.Series(tr).rolling(window=14).mean()[-20:]) if len(tr) >= 20 else 0
 
     return ma5, ma10, ma20, rsi, macd_line, signal_line, avg_volume, current_volume
 
@@ -118,42 +122,48 @@ def scan_for_signals():
     long_signals = []
     short_signals = []
 
+    # Проверяем, разрешено ли сейчас торговать
+    if not is_trading_time():
+        logger.info("🕒 Вне торгового времени — пропуск сканирования")
+        return long_signals, short_signals
+
     for symbol in SYMBOLS:
         for exchange in ["bybit", "binance"]:
             df = fetch_klines(symbol, exchange)
             if df is None or len(df) < 50:
                 continue
 
-            ma5, ma10, ma20, rsi, macd_line, signal_line, avg_volume, current_volume = calculate_indicators(df)
-
-            # Анализируем ПРЕДЫДУЩУЮ (закрытую) свечу
             if len(df) < 2:
                 continue
-            current_price = df["close"].iloc[-2]  # ← ЗАКРЫТИЕ ПРЕДЫДУЩЕЙ СВЕЧИ
-            current_volume_prev = df["volume"].iloc[-2]  # объём предыдущей свечи
 
-            # LONG: цена > MA5, MA10, MA20 + RSI < 70 + MACD > Signal + Объём > 1.5x среднего
+            ma5, ma10, ma20, rsi, macd_line, signal_line, avg_volume, _ = calculate_indicators(df)
+
+            # Анализируем ПРЕДЫДУЩУЮ (закрытую) свечу
+            current_price = df["close"].iloc[-2]
+            current_volume_prev = df["volume"].iloc[-2]
+
+            # LONG
             if (current_price > ma5 and current_price > ma10 and current_price > ma20 and
                 rsi < 70 and macd_line > signal_line and
-                current_volume_prev > avg_volume * 1.5):  # ← ФИЛЬТР ОБЪЁМА
-                long_signals.append(f"✅ {symbol.upper()} ({exchange.title()}) [RSI={rsi:.2f}, Vol={current_volume_prev:.0f}]")
+                current_volume_prev > avg_volume * 1.5):
+                long_signals.append(f"✅ {symbol.upper()} ({exchange.title()}) [RSI={rsi:.2f}]")
 
-            # SHORT: цена < MA5, MA10, MA20 + RSI > 30 + MACD < Signal + Объём > 1.5x среднего
+            # SHORT
             elif (current_price < ma5 and current_price < ma10 and current_price < ma20 and
                   rsi > 30 and macd_line < signal_line and
-                  current_volume_prev > avg_volume * 1.5):  # ← ФИЛЬТР ОБЪЁМА
-                short_signals.append(f"🔻 {symbol.upper()} ({exchange.title()}) [RSI={rsi:.2f}, Vol={current_volume_prev:.0f}]")
+                  current_volume_prev > avg_volume * 1.5):
+                short_signals.append(f"🔻 {symbol.upper()} ({exchange.title()}) [RSI={rsi:.2f}]")
 
     return long_signals, short_signals
 
 def send_report():
     try:
-        logger.info("🔍 Сканирование Bybit + Binance (MA 5/10/20 + RSI + MACD + Volume Filter)...")
+        logger.info("🔍 Сканирование Bybit + Binance (MA 5/10/20 + RSI + MACD + Volume + Time Filter)...")
         longs, shorts = scan_for_signals()
 
         message = "📊 Сигналы по стратегии:\n"
-        message += "📈 LONG: цена > MA5, MA10, MA20 + RSI < 70 + MACD > Signal + Объём > 1.5x\n"
-        message += "📉 SHORT: цена < MA5, MA10, MA20 + RSI > 30 + MACD < Signal + Объём > 1.5x\n\n"
+        message += "📈 LONG: цена > MA5, MA10, MA20 + RSI < 70 + MACD > Signal + Vol > 1.5x\n"
+        message += "📉 SHORT: цена < MA5, MA10, MA20 + RSI > 30 + MACD < Signal + Vol > 1.5x\n\n"
 
         if longs:
             message += "✅ LONG:\n" + "\n".join(longs) + "\n\n"
