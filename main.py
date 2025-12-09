@@ -13,30 +13,46 @@ if not TELEGRAM_BOT_TOKEN or not YOUR_TELEGRAM_ID:
     logger.error("Не заданы TELEGRAM_BOT_TOKEN или YOUR_TELEGRAM_ID")
     exit(1)
 
-# Заголовки для обхода защиты Bybit
+# Заголовки для обхода Cloudflare/бот-защиты Bybit
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-    'Referer': 'https://www.bybit.com/'
+    'Referer': 'https://www.bybit.com/',
+    'Accept': 'application/json',
+    'Accept-Language': 'en-US,en;q=0.9',
 }
 
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {'chat_id': YOUR_TELEGRAM_ID, 'text': text, 'parse_mode': 'HTML'}
+    payload = {
+        'chat_id': YOUR_TELEGRAM_ID,
+        'text': text,
+        'parse_mode': 'HTML'
+    }
     try:
-        requests.post(url, data=payload, timeout=10)
+        response = requests.post(url, data=payload, timeout=10)
+        if response.status_code != 200:
+            logger.error(f"Telegram API вернул ошибку: {response.status_code} – {response.text}")
     except Exception as e:
-        logger.error(f"Ошибка Telegram: {e}")
+        logger.error(f"Ошибка отправки в Telegram: {e}")
 
 def get_bybit_symbols():
     try:
         url = "https://api.bybit.com/v5/market/instruments-info"
         params = {'category': 'linear'}
         response = requests.get(url, params=params, headers=HEADERS, timeout=10)
+        if response.status_code != 200:
+            logger.error(f"Bybit instruments: HTTP {response.status_code}")
+            return []
         data = response.json()
-        return [item['symbol'] for item in data['result']['list']
-                if item['status'] == 'Trading' and item['symbol'].endswith('USDT')]
+        if data.get('retCode') != 0:
+            logger.error(f"Bybit error: {data.get('retMsg')}")
+            return []
+        return [
+            item['symbol'] for item in data['result']['list']
+            if item['status'] == 'Trading' and item['symbol'].endswith('USDT')
+        ]
     except Exception as e:
-        logger.error(f"Ошибка Bybit (инструменты): {e} | Ответ: {response.text[:200]}")
+        logger.error(f"Ошибка получения инструментов Bybit: {e}")
         return []
 
 def get_klines_bybit(symbol, interval='60', limit=100):
@@ -44,8 +60,12 @@ def get_klines_bybit(symbol, interval='60', limit=100):
         url = "https://api.bybit.com/v5/market/kline"
         params = {'category': 'linear', 'symbol': symbol, 'interval': interval, 'limit': limit}
         response = requests.get(url, params=params, headers=HEADERS, timeout=10)
+        if response.status_code != 200:
+            logger.error(f"Bybit kline {symbol}: HTTP {response.status_code}")
+            return [], []
         data = response.json()
-        if data['retCode'] != 0:
+        if data.get('retCode') != 0:
+            logger.error(f"Bybit kline error for {symbol}: {data.get('retMsg')}")
             return [], []
         closes, volumes = [], []
         for kline in data['result']['list']:
@@ -55,7 +75,7 @@ def get_klines_bybit(symbol, interval='60', limit=100):
         volumes.reverse()
         return closes, volumes
     except Exception as e:
-        logger.error(f"Ошибка Bybit (свечи {symbol}): {e} | Ответ: {response.text[:200]}")
+        logger.error(f"Ошибка получения свечей {symbol}: {e}")
         return [], []
 
 def calculate_rsi(prices, period=14):
@@ -148,10 +168,9 @@ def analyze_short_signal(symbol):
 
 def main():
     logger.info("🔍 Сканирование Bybit (LONG + SHORT)...")
-    try:
-        symbols = get_bybit_symbols()[:100]
-    except Exception as e:
-        logger.error(f"Не удалось получить список монет: {e}")
+    symbols = get_bybit_symbols()[:100]
+    if not symbols:
+        logger.warning("Не удалось получить список монет — пропуск цикла")
         return
     long_count = 0
     short_count = 0
@@ -162,7 +181,7 @@ def main():
             if analyze_short_signal(symbol):
                 short_count += 1
         except Exception as e:
-            logger.error(f"Ошибка при анализе {symbol}: {e}")
+            logger.error(f"Ошибка анализа {symbol}: {e}")
             continue
     logger.info(f"✅ Найдено: {long_count} LONG, {short_count} SHORT")
 
@@ -171,5 +190,5 @@ if __name__ == "__main__":
         try:
             main()
         except Exception as e:
-            logger.error(f"Критическая ошибка в основном цикле: {e}")
-        time.sleep(900)
+            logger.error(f"Критическая ошибка: {e}")
+        time.sleep(900)  # 15 минут
