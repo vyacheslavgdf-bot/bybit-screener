@@ -25,14 +25,13 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
 
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-# === Фиксированный список популярных пар (USDT-фьючерсы) ===
+# === Фиксированный список популярных пар ===
 SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT",
     "DOGEUSDT", "AVAXUSDT", "MATICUSDT", "LINKUSDT", "UNIUSDT",
     "LTCUSDT", "BCHUSDT", "ATOMUSDT", "NEARUSDT", "APTUSDT"
 ]
 
-TIMEFRAME = "15m"
 LIMIT = 100
 
 # === Вспомогательные функции ===
@@ -55,30 +54,19 @@ def fetch_klines(symbol, exchange):
         data = response.json()
         if exchange == "bybit":
             if data.get("retCode") != 0:
-                logger.warning(f"{exchange.upper()} {symbol}: ошибка данных")
                 return None
             klines = data["result"]["list"]
             df = pd.DataFrame(klines, columns=["time", "open", "high", "low", "close", "volume", "turnover"])
-            df["close"] = pd.to_numeric(df["close"])
         else:  # binance
             df = pd.DataFrame(data, columns=[
                 "open_time", "open", "high", "low", "close", "volume",
                 "close_time", "qav", "trades", "taker_base", "taker_quote", "ignore"
             ])
-            df["close"] = pd.to_numeric(df["close"])
-
-        df["close"] = df["close"].astype(float)
-        return df["close"].values
+        df["close"] = pd.to_numeric(df["close"])
+        df["high"] = pd.to_numeric(df["high"])
+        df["low"] = pd.to_numeric(df["low"])
+        df["volume"] = pd.to_numeric(df["volume"])
+        return df
 
     except Exception as e:
-        logger.error(f"Ошибка получения данных {exchange} {symbol}: {e}")
-        return None
-
-def calculate_ema(prices, window):
-    return pd.Series(prices).ewm(span=window, adjust=False).mean().iloc[-1]
-
-def scan_for_signals():
-    long_signals = []
-    short_signals = []
-
-    for symbol
+        logger.error(f"Ошибка получения
