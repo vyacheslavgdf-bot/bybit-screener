@@ -13,12 +13,18 @@ if not TELEGRAM_BOT_TOKEN or not YOUR_TELEGRAM_ID:
     logger.error("Не заданы TELEGRAM_BOT_TOKEN или YOUR_TELEGRAM_ID")
     exit(1)
 
-# Заголовки для обхода Cloudflare/бот-защиты Bybit
+# Улучшенные заголовки для обхода защиты Bybit (включая HTTP 403)
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Referer': 'https://www.bybit.com/',
     'Accept': 'application/json',
     'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Origin': 'https://www.bybit.com',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-site',
+    'Connection': 'keep-alive'
 }
 
 def send_telegram_message(text):
@@ -31,7 +37,7 @@ def send_telegram_message(text):
     try:
         response = requests.post(url, data=payload, timeout=10)
         if response.status_code != 200:
-            logger.error(f"Telegram API вернул ошибку: {response.status_code} – {response.text}")
+            logger.error(f"Telegram API ошибка: {response.status_code} – {response.text}")
     except Exception as e:
         logger.error(f"Ошибка отправки в Telegram: {e}")
 
@@ -45,14 +51,14 @@ def get_bybit_symbols():
             return []
         data = response.json()
         if data.get('retCode') != 0:
-            logger.error(f"Bybit error: {data.get('retMsg')}")
+            logger.error(f"Bybit ошибка: {data.get('retMsg')}")
             return []
         return [
             item['symbol'] for item in data['result']['list']
             if item['status'] == 'Trading' and item['symbol'].endswith('USDT')
         ]
     except Exception as e:
-        logger.error(f"Ошибка получения инструментов Bybit: {e}")
+        logger.error(f"Ошибка получения списка инструментов: {e}")
         return []
 
 def get_klines_bybit(symbol, interval='60', limit=100):
@@ -65,7 +71,7 @@ def get_klines_bybit(symbol, interval='60', limit=100):
             return [], []
         data = response.json()
         if data.get('retCode') != 0:
-            logger.error(f"Bybit kline error for {symbol}: {data.get('retMsg')}")
+            logger.error(f"Bybit kline ошибка для {symbol}: {data.get('retMsg')}")
             return [], []
         closes, volumes = [], []
         for kline in data['result']['list']:
@@ -190,5 +196,5 @@ if __name__ == "__main__":
         try:
             main()
         except Exception as e:
-            logger.error(f"Критическая ошибка: {e}")
-        time.sleep(900)  # 15 минут
+            logger.error(f"Критическая ошибка в основном цикле: {e}")
+        time.sleep(900)
