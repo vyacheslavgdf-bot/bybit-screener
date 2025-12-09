@@ -1,5 +1,5 @@
-python-telegram-bot==20.7
-numpy
-pandas
-requests
-schedule
+requests==2.32.3
+pandas==2.2.3
+numpy==1.26.4
+python-telegram-bot==21.7
+schedule==1.2.1
