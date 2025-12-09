@@ -62,6 +62,9 @@ def get_klines_bybit(symbol, interval='60', limit=100):
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
         return None
-    gains = []
-    losses = []
-    for i in range
+    def calculate_macd(prices, fast=12, slow=26, signal=9):
+    ema_fast = []
+    ema_slow = []
+    for i in range(len(prices)):  # ← Убедись, что тут есть `len(prices)` и `:`
+        if i + 1 >= fast:
+            ema_fast.append(sum(prices[i - fast + 1:i + 1]) / fast)
