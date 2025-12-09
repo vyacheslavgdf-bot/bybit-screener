@@ -148,14 +148,22 @@ def analyze_short_signal(symbol):
 
 def main():
     logger.info("🔍 Сканирование Bybit (LONG + SHORT)...")
-    symbols = get_bybit_symbols()[:100]
+    try:
+        symbols = get_bybit_symbols()[:100]
+    except Exception as e:
+        logger.error(f"Не удалось получить список монет: {e}")
+        return
     long_count = 0
     short_count = 0
     for symbol in symbols:
-        if analyze_long_signal(symbol):
-            long_count += 1
-        if analyze_short_signal(symbol):
-            short_count += 1
+        try:
+            if analyze_long_signal(symbol):
+                long_count += 1
+            if analyze_short_signal(symbol):
+                short_count += 1
+        except Exception as e:
+            logger.error(f"Ошибка при анализе {symbol}: {e}")
+            continue
     logger.info(f"✅ Найдено: {long_count} LONG, {short_count} SHORT")
 
 if __name__ == "__main__":
@@ -163,5 +171,5 @@ if __name__ == "__main__":
         try:
             main()
         except Exception as e:
-            logger.error(f"Ошибка в основном цикле: {e}")
+            logger.error(f"Критическая ошибка в основном цикле: {e}")
         time.sleep(900)
