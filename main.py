@@ -13,20 +13,6 @@ if not TELEGRAM_BOT_TOKEN or not YOUR_TELEGRAM_ID:
     logger.error("Не заданы TELEGRAM_BOT_TOKEN или YOUR_TELEGRAM_ID")
     exit(1)
 
-# Улучшенные заголовки для обхода защиты Bybit (включая HTTP 403)
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Referer': 'https://www.bybit.com/',
-    'Accept': 'application/json',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Origin': 'https://www.bybit.com',
-    'Sec-Fetch-Dest': 'empty',
-    'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Site': 'same-site',
-    'Connection': 'keep-alive'
-}
-
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
@@ -41,47 +27,39 @@ def send_telegram_message(text):
     except Exception as e:
         logger.error(f"Ошибка отправки в Telegram: {e}")
 
-def get_bybit_symbols():
+def get_binance_symbols():
     try:
-        url = "https://api.bybit.com/v5/market/instruments-info"
-        params = {'category': 'linear'}
-        response = requests.get(url, params=params, headers=HEADERS, timeout=10)
+        url = "https://api.binance.com/api/v3/exchangeInfo"
+        response = requests.get(url, timeout=10)
         if response.status_code != 200:
-            logger.error(f"Bybit instruments: HTTP {response.status_code}")
+            logger.error(f"Binance exchangeInfo: HTTP {response.status_code}")
             return []
         data = response.json()
-        if data.get('retCode') != 0:
-            logger.error(f"Bybit ошибка: {data.get('retMsg')}")
-            return []
-        return [
-            item['symbol'] for item in data['result']['list']
-            if item['status'] == 'Trading' and item['symbol'].endswith('USDT')
-        ]
+        symbols = []
+        for item in data['symbols']:
+            if item['status'] == 'TRADING' and item['quoteAsset'] == 'USDT':
+                symbols.append(item['symbol'])
+        return symbols
     except Exception as e:
-        logger.error(f"Ошибка получения списка инструментов: {e}")
+        logger.error(f"Ошибка получения списка Binance: {e}")
         return []
 
-def get_klines_bybit(symbol, interval='60', limit=100):
+def get_klines_binance(symbol, interval='1h', limit=100):
     try:
-        url = "https://api.bybit.com/v5/market/kline"
-        params = {'category': 'linear', 'symbol': symbol, 'interval': interval, 'limit': limit}
-        response = requests.get(url, params=params, headers=HEADERS, timeout=10)
+        url = "https://api.binance.com/api/v3/klines"
+        params = {'symbol': symbol, 'interval': interval, 'limit': limit}
+        response = requests.get(url, params=params, timeout=10)
         if response.status_code != 200:
-            logger.error(f"Bybit kline {symbol}: HTTP {response.status_code}")
+            logger.error(f"Binance klines {symbol}: HTTP {response.status_code}")
             return [], []
         data = response.json()
-        if data.get('retCode') != 0:
-            logger.error(f"Bybit kline ошибка для {symbol}: {data.get('retMsg')}")
-            return [], []
         closes, volumes = [], []
-        for kline in data['result']['list']:
-            closes.append(float(kline[4]))
-            volumes.append(float(kline[5]))
-        closes.reverse()
-        volumes.reverse()
+        for kline in data:
+            closes.append(float(kline[4]))      # close
+            volumes.append(float(kline[5]))     # volume
         return closes, volumes
     except Exception as e:
-        logger.error(f"Ошибка получения свечей {symbol}: {e}")
+        logger.error(f"Ошибка получения свечей Binance {symbol}: {e}")
         return [], []
 
 def calculate_rsi(prices, period=14):
@@ -106,11 +84,17 @@ def calculate_ma(prices, window):
     return sum(prices[-window:]) / window
 
 def analyze_long_signal(symbol):
-    closes, volumes = get_klines_bybit(symbol, '60', 100)
+    closes, volumes = get_klines_binance(symbol, '1h', 100)
     if len(closes) < 30:
+        return False
+    # Рост за 6 часов = 6 свечей на 1h
+    if len(closes) < 7:
         return False
     price_change_6h = (closes[-1] - closes[-7]) / closes[-7] * 100
     if price_change_6h < 25:
+        return False
+    # Объём за 24ч = 24 свечи
+    if len(volumes) < 25:
         return False
     avg_vol_24h = sum(volumes[-24:]) / 24
     if avg_vol_24h == 0:
@@ -118,9 +102,11 @@ def analyze_long_signal(symbol):
     vol_change_pct = (volumes[-1] - avg_vol_24h) / avg_vol_24h * 100
     if vol_change_pct < 300:
         return False
+    # RSI
     rsi = calculate_rsi(closes, 14)
     if not rsi or not (50 <= rsi <= 70):
         return False
+    # MA
     ma5 = calculate_ma(closes, 5)
     ma10 = calculate_ma(closes, 10)
     if not ma5 or not ma10 or ma5 <= ma10:
@@ -129,29 +115,33 @@ def analyze_long_signal(symbol):
     if not (ma10 * 0.99 <= price <= ma10 * 1.01):
         return False
     message = (
-        f"🟢 ПОТЕНЦИАЛЬНЫЙ LONG-СИГНАЛ (Bybit)!\n\n"
+        f"🟢 ПОТЕНЦИАЛЬНЫЙ LONG-СИГНАЛ (Binance)!\n\n"
         f"Монета: {symbol}\n"
         f"Рост за 6ч: +{price_change_6h:.1f}%\n"
         f"Объём: +{vol_change_pct:.0f}%\n"
         f"RSI(14): {rsi:.1f}\n"
         f"Цена у MA10, MA5 > MA10\n\n"
-        f"👉 Проверь график на 15m в Bybit!"
+        f"👉 Проверь график на 15m в Binance!"
     )
     send_telegram_message(message)
     return True
 
 def analyze_short_signal(symbol):
-    closes, volumes = get_klines_bybit(symbol, '60', 50)
+    closes, volumes = get_klines_binance(symbol, '1h', 50)
     if len(closes) < 25:
+        return False
+    if len(closes) < 7:
         return False
     price_change_6h = (closes[-1] - closes[-7]) / closes[-7] * 100
     if price_change_6h < 25:
         return False
-    avg_volume_24h = sum(volumes[-24:]) / 24
-    if avg_volume_24h == 0:
+    if len(volumes) < 25:
         return False
-    volume_change_pct = (volumes[-1] - avg_volume_24h) / avg_volume_24h * 100
-    if volume_change_pct < 300:
+    avg_vol_24h = sum(volumes[-24:]) / 24
+    if avg_vol_24h == 0:
+        return False
+    vol_change_pct = (volumes[-1] - avg_vol_24h) / avg_vol_24h * 100
+    if vol_change_pct < 300:
         return False
     rsi = calculate_rsi(closes, 14)
     if not rsi or rsi < 70:
@@ -161,23 +151,22 @@ def analyze_short_signal(symbol):
     if not ma5 or not ma10 or ma5 > ma10:
         return False
     message = (
-        f"🚨 ПОТЕНЦИАЛЬНЫЙ SHORT-СИГНАЛ (Bybit)!\n\n"
+        f"🚨 ПОТЕНЦИАЛЬНЫЙ SHORT-СИГНАЛ (Binance)!\n\n"
         f"Монета: {symbol}\n"
         f"Рост за 6ч: +{price_change_6h:.1f}%\n"
-        f"Объём: +{volume_change_pct:.0f}%\n"
+        f"Объём: +{vol_change_pct:.0f}%\n"
         f"RSI(14): {rsi:.1f}\n"
         f"MA: MA5 < MA10 (разворот)\n\n"
-        f"👉 Проверь график на 15m в Bybit!"
+        f"👉 Проверь график на 15m в Binance!"
     )
     send_telegram_message(message)
     return True
 
 def main():
-    logger.info("🔍 Сканирование Bybit (LONG + SHORT)...")
-    symbols = get_bybit_symbols()[:100]
-    if not symbols:
-        logger.warning("Не удалось получить список монет — пропуск цикла")
-        return
+    logger.info("🔍 Сканирование Binance (LONG + SHORT)...")
+    symbols = get_binance_symbols()
+    # Ограничиваем до топ-100 монет по объёму (опционально можно отсортировать)
+    symbols = [s for s in symbols if 'USDT' in s][:100]
     long_count = 0
     short_count = 0
     for symbol in symbols:
@@ -196,5 +185,5 @@ if __name__ == "__main__":
         try:
             main()
         except Exception as e:
-            logger.error(f"Критическая ошибка в основном цикле: {e}")
-        time.sleep(900)
+            logger.error(f"Критическая ошибка: {e}")
+        time.sleep(900)  # 15 минут
