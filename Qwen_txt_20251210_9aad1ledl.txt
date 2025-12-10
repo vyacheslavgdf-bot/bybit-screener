@@ -1,0 +1,6 @@
+# requirements.txt
+# cache-bust-20251210-render-fix-pure-requests
+requests
+pandas
+numpy
+schedule
