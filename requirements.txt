@@ -1,5 +1,0 @@
-requests
-pandas
-numpy
-schedule
-# force-rebuild-20251210
