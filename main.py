@@ -1,21 +1,24 @@
-def send_telegram(message):
-    """Отправка сообщения в Telegram с отладкой"""
+def get_top_symbols(limit=30):
+    """Получить топ монет по обороту (только USDT пары)"""
     try:
-        payload = {
-            "chat_id": YOUR_TELEGRAM_ID,
-            "text": message,
-            "parse_mode": "HTML"
-        }
-        print(f"📤 Попытка отправить: {message}", flush=True)
-        response = requests.post(TELEGRAM_URL, json=payload, timeout=10)
-        if response.ok:
-            print(f"✅ Успешно отправлено", flush=True)
-        else:
-            print(f"❌ Ошибка Telegram API: {response.status_code} - {response.text}", flush=True)
-        return response
-    except Exception as e:
-        print(f"❌ Исключение при отправке: {e}", flush=True)
-        return None
+        url = "https://api.bybit.com/v5/market/tickers?category=linear"
+        response = requests.get(url, timeout=10)
+
+        # Проверяем, что ответ не пустой и не HTML
+        if not response.text.strip():
+            send_telegram("❌ Bybit API вернул пустой ответ. Повторная попытка через 5 мин.")
+            return []
+        
+        if "<html" in response.text.lower():
+            send_telegram("❌ Bybit API вернул HTML (возможно, капча или rate limit).")
+            return []
+
+        data = response.json()
+
+        if data.get("retCode") != 0:
+            send_telegram(f"❌ Ошибка Bybit API при получении списка монет: {data.get('retMsg')}")
+            return []
+
         symbols = []
         for item in data["result"]["list"]:
             if "USDT" in item["symbol"] and not "USDC" in item["symbol"]:
