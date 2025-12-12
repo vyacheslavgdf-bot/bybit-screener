@@ -2,7 +2,7 @@ import os
 import json
 import requests
 import numpy as np
-from flask import Flask, request
+from flask import Flask
 from datetime import datetime, timezone
 
 # === НАСТРОЙКИ ===
@@ -34,20 +34,16 @@ def get_top_symbols(limit=20):
     try:
         url = "https://api.bybit.com/v5/market/tickers?category=linear"
         response = requests.get(url, timeout=10)
-        
-        # Отладка: отправим первые 100 символов ответа в Telegram
-        send_telegram(f"📡 Ответ Bybit API:\n{response.text[:100]}")
+        send_telegram(f"📡 Ответ Bybit API (первые 100 символов):\n{response.text[:100]}")
         
         if not response.text.strip():
             send_telegram("❌ Bybit API вернул пустой ответ.")
             return []
-        
         if "<html" in response.text.lower():
             send_telegram("❌ Bybit API вернул HTML (возможно, капча или rate limit).")
             return []
 
         data = response.json()
-
         if data.get("retCode") != 0:
             send_telegram(f"❌ Ошибка Bybit API: {data.get('retMsg')}")
             return []
@@ -112,7 +108,9 @@ def scan_market():
             rsi = calculate_rsi(closes)
             current_price = closes[-1]
             send_telegram(f"🔍 {symbol}\nЦена: {current_price:.6f}\nRSI: {rsi:.1f}")
-            time.sleep(1)
+            # Небольшая задержка для соблюдения лимитов API
+            import time
+            time.sleep(0.5)
 
     send_telegram("✅ Сканирование завершено.")
 
@@ -120,7 +118,7 @@ def scan_market():
 app = Flask(__name__)
 
 @app.route('/')
-def trigger_scan():
+def trigger():
     scan_market()
     return "OK", 200
 
