@@ -1,7 +1,7 @@
 def get_top_symbols(limit=30):
     """Получить топ монет по обороту (только USDT пары)"""
     try:
-        url = "https://api.bybit.com/v5/market/tickers?category=linear"
+        url = "https://api.bybit.com/v5/market/tickers?category=linear
         response = requests.get(url, timeout=10)
 
         # Проверяем, что ответ не пустой и не HTML
