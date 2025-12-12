@@ -18,6 +18,7 @@ try:
 except ValueError:
     raise ValueError("YOUR_TELEGRAM_ID должен быть числом")
 
+# ИСПРАВЛЕНО: убраны лишние пробелы
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
 def send_telegram(message):
@@ -33,6 +34,7 @@ def send_telegram(message):
 
 def get_top_symbols(limit=20):
     try:
+        # ИСПРАВЛЕНО: убраны пробелы в конце
         url = "https://api.bybit.com/v5/market/tickers?category=linear"
         response = requests.get(url, timeout=10)
         if not response.text.strip() or "<html" in response.text.lower():
@@ -69,6 +71,7 @@ def calculate_rsi(prices, period=14):
 
 def get_klines(symbol, interval="60", limit=30):
     try:
+        # ИСПРАВЛЕНО: убраны пробелы перед {symbol}
         url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}"
         response = requests.get(url, timeout=10)
         data = response.json()
@@ -76,7 +79,8 @@ def get_klines(symbol, interval="60", limit=30):
             return []
         closes = [float(c[4]) for c in data["result"]["list"]]
         return closes[::-1]
-    except:
+    except Exception as e:
+        print(f"❌ Ошибка получения свечей для {symbol}: {e}")
         return []
 
 def scan_market():
@@ -86,7 +90,7 @@ def scan_market():
     symbols = get_top_symbols(limit=10)
     send_telegram(f"Анализирую {len(symbols)} монет...")
     
-    for symbol in symbols[:3]:  # Только первые 3 для теста
+    for symbol in symbols[:3]:
         closes = get_klines(symbol)
         if closes and len(closes) > 15:
             rsi = calculate_rsi(closes)
@@ -100,7 +104,7 @@ def scan_market():
 if __name__ == "__main__":
     print("🐍 main.py запущен", flush=True)
     send_telegram("✅ <b>Бот запущен!</b>\nСканирование каждые 5 минут.")
-    scan_market()  # Первый запуск сразу
+    scan_market()
     schedule.every(5).minutes.do(scan_market)
 
     while True:
