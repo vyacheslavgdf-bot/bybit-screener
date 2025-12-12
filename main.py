@@ -1,3 +1,4 @@
+send_telegram("🧪 ТЕСТ: функция scan_market() вызвана")
 def get_top_symbols(limit=10):
     try:
         url = "https://api.bybit.com/v5/market/tickers?category=linear"
