@@ -3,6 +3,7 @@ import json
 import requests
 import numpy as np
 from flask import Flask, request
+from datetime import datetime, timezone
 
 # === НАСТРОЙКИ ===
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -124,6 +125,5 @@ def trigger_scan():
     return "OK", 200
 
 if __name__ == "__main__":
-    from datetime import datetime, timezone
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
