@@ -3,8 +3,8 @@ def get_top_symbols(limit=20):
         url = "https://api.bybit.com/v5/market/tickers?category=linear"
         response = requests.get(url, timeout=10)
         
-        # Отладка: отправим в Telegram первые 100 символов ответа
-        send_telegram(f"📡 Ответ Bybit API:\n{response.text[:100]}")
+        # 👇 Отправляем первые 100 символов ответа в Telegram для отладки
+        send_telegram(f"📡 Ответ Bybit API (первые 100 символов):\n{response.text[:100]}")
         
         if not response.text.strip():
             send_telegram("❌ Bybit API вернул пустой ответ.")
@@ -22,8 +22,7 @@ def get_top_symbols(limit=20):
 
         symbols = []
         for item in data["result"]["list"]:
-            # Уберём фильтр по USDC для теста
-            if "USDT" in item["symbol"]:  # ← убрано "and 'USDC' not in item['symbol']"
+            if "USDT" in item["symbol"] and "USDC" not in item["symbol"]:
                 try:
                     vol = float(item["turnover24h"])
                     symbols.append((item["symbol"], vol))
