@@ -1,121 +1,104 @@
+# main.py
 import os
-import json
-import requests
-import numpy as np
-import schedule
 import time
+import schedule
+import requests
+import pandas as pd
+import numpy as np
 from datetime import datetime, timezone
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-YOUR_TELEGRAM_ID = os.getenv("YOUR_TELEGRAM_ID")
-
-if not TELEGRAM_BOT_TOKEN or not YOUR_TELEGRAM_ID:
-    raise ValueError("❌ TELEGRAM_BOT_TOKEN или YOUR_TELEGRAM_ID не заданы")
-
-try:
-    YOUR_TELEGRAM_ID = int(YOUR_TELEGRAM_ID)
-except ValueError:
-    raise ValueError("YOUR_TELEGRAM_ID должен быть числом")
-
-TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"  # ✅ пробелы удалены
-
-def send_telegram(message):
+def send_telegram_message(bot_token, chat_id, text: str):
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text}
     try:
-        payload = {"chat_id": YOUR_TELEGRAM_ID, "text": message, "parse_mode": "HTML"}
-        response = requests.post(TELEGRAM_URL, json=payload, timeout=10)
-        if not response.ok:
-            print(f"❌ Telegram API error: {response.text}")
-        return response
+        resp = requests.post(url, json=payload, timeout=10)
+        if resp.status_code == 200:
+            print("✅ Сообщение отправлено")
+        else:
+            print(f"❌ Ошибка Telegram: {resp.json()}")
     except Exception as e:
-        print(f"❌ Ошибка отправки: {e}")
-        return None
+        print(f"❌ Исключение при отправке: {e}")
 
-def get_top_symbols(limit=20):
-    try:
-        url = "https://api.bybit.com/v5/market/tickers?category=linear"  # ✅ пробелы удалены
-        response = requests.get(url, timeout=10)
-        
-        if not response.text.strip():
-            send_telegram("❌ Bybit API вернул пустой ответ.")
-            return []
-        if "<html" in response.text.lower():
-            send_telegram("❌ Bybit API вернул HTML (капча или rate limit).")
-            return []
+def main():
+    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+    YOUR_TELEGRAM_ID = os.getenv("YOUR_TELEGRAM_ID")
 
-        data = response.json()
-        if data.get("retCode") != 0:
-            send_telegram(f"❌ Ошибка Bybit API: {data.get('retMsg')}")
-            return []
+    if not TELEGRAM_BOT_TOKEN or not YOUR_TELEGRAM_ID:
+        raise RuntimeError("❌ TELEGRAM_BOT_TOKEN или YOUR_TELEGRAM_ID не заданы!")
 
-        symbols = []
-        for item in data["result"]["list"]:
-            if "USDT" in item["symbol"] and "USDC" not in item["symbol"]:
-                try:
-                    vol = float(item["turnover24h"])
-                    symbols.append((item["symbol"], vol))
-                except (ValueError, KeyError):
-                    continue
+    print("🚀 Запуск Daily Signal Bot...")
+    send_telegram_message(TELEGRAM_BOT_TOKEN, YOUR_TELEGRAM_ID, "✅ Daily Signal Bot запущен! Сканирование ежедневно в 00:05 UTC.")
 
-        symbols.sort(key=lambda x: x[1], reverse=True)
-        top_symbols = [s[0] for s in symbols[:limit]]
-        send_telegram(f"✅ Найдено {len(top_symbols)} монет: {top_symbols[:3]}")
-        return top_symbols
+    def get_bybit_symbols():
+        url = "https://api.bybit.com/v5/market/tickers"
+        params = {"category": "linear"}
+        try:
+            resp = requests.get(url, params=params, timeout=10)
+            data = resp.json()
+            if data["retCode"] == 0:
+                symbols = [item["symbol"] for item in data["result"]["list"] if item["symbol"].endswith("USDT")]
+                return symbols
+            else:
+                return ["BTCUSDT", "ETHUSDT"]
+        except:
+            return ["BTCUSDT", "ETHUSDT"]
 
-    except json.JSONDecodeError as e:
-        send_telegram(f"❌ Ошибка JSON: {str(e)}\nОтвет: {response.text[:100]}")
-        return []
-    except Exception as e:
-        send_telegram(f"❌ Исключение: {str(e)}")
-        return []
+    def get_daily_klines(symbol: str, limit: int = 5):
+        url = "https://api.bybit.com/v5/market/kline"
+        params = {"category": "linear", "symbol": symbol, "interval": "D", "limit": limit}
+        try:
+            resp = requests.get(url, params=params, timeout=10)
+            data = resp.json()
+            if data["retCode"] == 0:
+                df = pd.DataFrame(
+                    data["result"]["list"],
+                    columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"]
+                )
+                df = df.astype({"open": float, "high": float, "low": float, "close": float, "volume": float})
+                df["timestamp"] = pd.to_datetime(df["timestamp"].astype(int), unit='ms')
+                df = df.sort_values("timestamp").reset_index(drop=True)
+                return df
+            else:
+                return None
+        except:
+            return None
 
-def calculate_rsi(prices, period=14):
-    if len(prices) < period + 1:
-        return 50
-    deltas = np.diff(prices)
-    gains = np.where(deltas > 0, deltas, 0)
-    losses = np.where(deltas < 0, -deltas, 0)
-    avg_gain = np.mean(gains[:period])
-    avg_loss = np.mean(losses[:period])
-    if avg_loss == 0:
-        return 100
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+    def analyze_daily_signal(df: pd.DataFrame):
+        if df is None or len(df) < 3:
+            return None, None
+        yesterday_close = df.iloc[-1]["close"]
+        day_before_close = df.iloc[-2]["close"]
+        if yesterday_close > day_before_close:
+            return "LONG", yesterday_close
+        elif yesterday_close < day_before_close:
+            return "SHORT", yesterday_close
+        else:
+            return None, None
 
-def get_klines(symbol, interval="60", limit=30):
-    try:
-        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}"  # ✅ пробелы удалены
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        if data.get("retCode") != 0:
-            return []
-        closes = [float(c[4]) for c in data["result"]["list"]]
-        return closes[::-1]
-    except Exception as e:
-        print(f"❌ Ошибка получения свечей для {symbol}: {e}")
-        return []
+    def scan_daily_signals():
+        symbols = get_bybit_symbols()
+        print(f"📅 Сканируем {len(symbols)} пар на D1...")
+        signals_found = False
+        for symbol in symbols[:20]:
+            df = get_daily_klines(symbol, limit=5)
+            if df is None:
+                continue
+            signal, price = analyze_daily_signal(df)
+            if signal:
+                last_ts = df.iloc[-1]["timestamp"]
+                now_utc = datetime.now(timezone.utc)
+                if (now_utc.date() - last_ts.date()).days == 1:
+                    msg = f"📊 Daily Signal ({last_ts.strftime('%Y-%m-%d')})\nПара: {symbol}\nНаправление: {signal}\nЦена закрытия: {price:.4f}"
+                    send_telegram_message(TELEGRAM_BOT_TOKEN, YOUR_TELEGRAM_ID, msg)
+                    signals_found = True
+        if not signals_found:
+            print("ℹ️ Нет новых сигналов сегодня.")
 
-def scan_market():
-    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    send_telegram(f"🕗 <b>Запуск сканирования</b>\nВремя: {now_utc}")
-    
-    symbols = get_top_symbols(limit=10)
-    send_telegram(f"Анализирую {len(symbols)} монет...")
-    
-    for symbol in symbols[:3]:
-        closes = get_klines(symbol)
-        if closes and len(closes) > 15:
-            rsi = calculate_rsi(closes)
-            current_price = closes[-1]
-            send_telegram(f"🔍 {symbol}\nЦена: {current_price:.6f}\nRSI: {rsi:.1f}")
-            time.sleep(0.5)
+    schedule.every().day.at("00:05").do(scan_daily_signals)
 
-    send_telegram("✅ Сканирование завершено.")
-
-# === Фоновый запуск ===
-if __name__ == "__main__":
-    print("📡 Запуск фонового сканера...")
-    scan_market()  # первый запуск сразу
-    schedule.every(5).minutes.do(scan_market)
     while True:
         schedule.run_pending()
-        time.sleep(1)
+        time.sleep(60)
+
+if __name__ == "__main__":
+    main()
