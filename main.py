@@ -2,10 +2,10 @@ import os
 import json
 import requests
 import numpy as np
-from flask import Flask
+import schedule
+import time
 from datetime import datetime, timezone
 
-# === НАСТРОЙКИ ===
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 YOUR_TELEGRAM_ID = os.getenv("YOUR_TELEGRAM_ID")
 
@@ -17,7 +17,7 @@ try:
 except ValueError:
     raise ValueError("YOUR_TELEGRAM_ID должен быть числом")
 
-TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"  # ✅ пробелы удалены
 
 def send_telegram(message):
     try:
@@ -32,15 +32,14 @@ def send_telegram(message):
 
 def get_top_symbols(limit=20):
     try:
-        url = "https://api.bybit.com/v5/market/tickers?category=linear"
+        url = "https://api.bybit.com/v5/market/tickers?category=linear"  # ✅ пробелы удалены
         response = requests.get(url, timeout=10)
-        send_telegram(f"📡 Ответ Bybit API (первые 100 символов):\n{response.text[:100]}")
         
         if not response.text.strip():
             send_telegram("❌ Bybit API вернул пустой ответ.")
             return []
         if "<html" in response.text.lower():
-            send_telegram("❌ Bybit API вернул HTML (возможно, капча или rate limit).")
+            send_telegram("❌ Bybit API вернул HTML (капча или rate limit).")
             return []
 
         data = response.json()
@@ -84,7 +83,7 @@ def calculate_rsi(prices, period=14):
 
 def get_klines(symbol, interval="60", limit=30):
     try:
-        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}"
+        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}"  # ✅ пробелы удалены
         response = requests.get(url, timeout=10)
         data = response.json()
         if data.get("retCode") != 0:
@@ -108,20 +107,15 @@ def scan_market():
             rsi = calculate_rsi(closes)
             current_price = closes[-1]
             send_telegram(f"🔍 {symbol}\nЦена: {current_price:.6f}\nRSI: {rsi:.1f}")
-            # Небольшая задержка для соблюдения лимитов API
-            import time
             time.sleep(0.5)
 
     send_telegram("✅ Сканирование завершено.")
 
-# === Flask App ===
-app = Flask(__name__)
-
-@app.route('/')
-def trigger():
-    scan_market()
-    return "OK", 200
-
+# === Фоновый запуск ===
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    print("📡 Запуск фонового сканера...")
+    scan_market()  # первый запуск сразу
+    schedule.every(5).minutes.do(scan_market)
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
